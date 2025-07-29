@@ -1,1 +1,22 @@
-im diddy
+{
+  "manifest_version": 3,
+  "name": "Image-Translator",
+  "description": "translate images to english or desired language",
+  "version":"1.0",
+  "action":{
+      "default_pop-up": "popup/popup.html"
+  },
+  "icons":{
+      "16": "images/16.png",
+      "32": "images/32.png",
+      "48": "images/48.png",
+      "128": "images/128.png"
+  },
+  "background": {
+      "service_worker": "background.js",
+      "type": "module"
+  },
+  "permission": [
+      "storage"
+  ]
+}
