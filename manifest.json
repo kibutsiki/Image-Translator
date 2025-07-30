@@ -4,7 +4,7 @@
   "description": "translate images to english or desired language",
   "version":"1.0",
   "action":{
-      "default_pop-up": "popup/popup.html"
+      "default_popup": "popup/popup.html"
   },
   "icons":{
       "16": "images/16.png",
@@ -16,7 +16,7 @@
       "service_worker": "background.js",
       "type": "module"
   },
-  "permission": [
+  "permissions": [
       "storage"
   ]
 }
