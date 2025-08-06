@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Translate Images</title>
   <link rel="stylesheet" href="bulma.min.css">
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
     <div class="container m-3">
@@ -12,11 +13,28 @@
 
         
           <div class="field is-large has-text-centered">
-            <button class="button is-primary is-large"style = "margin-right: 15px">Translate</button>
+            <button class="button is-primary is-large"style = "margin-right: 15px" id = "Translate-Id">Translate</button>
           </div>
 
+          <div class="language">
+            <p class="text" style="text-align: center;">Translate To</p>
+            <div class="is-flex is-justify-content-center">
+              <div class="select is-large">
+                <select id="language-Id">
+                  <option value="english">English</option>
+                  <option value="spanish">Spanish</option>
+                  <option value="french">French</option>
+                  <option value="german">German</option>
+                  <option value="chinese">Chinese</option>
+                  <option value="japanese">Japanese</option>
+                </select>
+              </div>
+            </div>
+          </div>
 
     </div>
 
 </body>
+
+<script src="pop.js"></script>
 </html>
