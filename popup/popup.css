@@ -1,7 +1,0 @@
-.outer-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;      /* horizontal centering */
-  justify-content: center;  /* vertical centering */
-  height: 100vh;            /* or 100% of parent, as needed */
-}
