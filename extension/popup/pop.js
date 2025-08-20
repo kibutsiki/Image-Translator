@@ -1,3 +1,5 @@
+import { v4 as uuidv4 } from 'uuid';
+
 //Buttons
 const TranslateButton = document.getElementById("Translate-Id");
 const language = document.getElementById("language-Id");
@@ -54,6 +56,7 @@ async function translateImage(imageSrcs, language) {
         if (!/^[a-z0-9]{2,5}$/.test(ext)) ext = "png";
 
         formData.append(`images`, blob, `image.${start + i}.${ext}`); //added blob
+        formData.append('session_id', session_id); //added session ID
         return true;
       } catch (error) {
         console.error("Error fetching image:", error);
@@ -66,13 +69,25 @@ async function translateImage(imageSrcs, language) {
       continue;
     }
     try {
-      const response = await fetch("http://localhost:3000/translate", { //fetches the backend
+      const ocrResponse = await fetch(`http://3.144.33.148/ocr`, { //fetches the backend
         method: "POST",// sending to backend
+        headers: { 'Authorization': 'kibutsiki'},
         body: formData //data
       });
-      if(!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json(); //returned data
-      console.log("Backend Response:", data);
+      if(!ocrResponse.ok) throw new Error(`HTTP ${ocrResponse.status}`);
+      const ocrData = await ocrResponse.json(); //returned data
+      ocrData.results.forEach(result => {
+        console.log("OCR Result:", result);
+      }); 
+      const translateResponse = await fetch('http://3.144.33.148/translate', {
+        method: "POST",
+        headers: { 'Authorization': 'kibutsiki'},
+        body: formData
+      });
+      const translateData = await translateResponse.json();
+      translateData.results.forEach(result => {
+        console.log("Translate Result:", result);
+      });
     } catch (e) {
       console.error("Error sending to Backend:", e);
     }

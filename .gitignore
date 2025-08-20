@@ -2,14 +2,5 @@
 server/node_modules/
 server/.env
 server/*.pem
+server/translator-key.json
 
-# Python (api)
-api/.venv/
-api/.env
-api/__pycache__/
-api/creds/
-
-# OS/IDE
-.DS_Store
-Thumbs.db
-.vscode/
