@@ -25,7 +25,7 @@ const allowedOrigins = [
 ]
 //functions
 function buildTesseractConfig(lang) {
-  const config = { lang: 'kor', oem: 1, psm: 3 };
+  const config = { lang: lang, oem: 1, psm: 3 };
   if (process.platform === 'win32') {
     config.executablePath = process.env.TESSERACT_PATH;
   }
@@ -98,29 +98,18 @@ app.post('/ocr', requireAuthentication , upload.array('images', 10), async (req,
   for(const f of req.files){
     try{
       const config = buildTesseractConfig(lang);
-      const { data } = await tesseract.recognize(f.buffer, config);
-      const bubbles = [];
-      data.words.forEach(word => {
-        let bubble = bubbles.find(b => Math.abs(b.y - word.bbox.y0) < 30);
-        if(!bubble){
-          bubble =  {y: word.bbox.y0, text: ''};
-          bubbles.push(bubble);
-        }
-        bubble.text += word.text + ' ';
-      });
-      results.push({filename: f.originalname, bubbles: session_id });
+      const text = await tesseract.recognize(f.buffer, config);
+      results.push({ filename: f.originalname, ocrText: text.trim(), session_id });
       await pool.query(
         'INSERT INTO ocr_results (filename, lang, ocr_text, session_id) VALUES ($1, $2, $3, $4)',
-        [f.originalname, lang, JSON.stringify(bubbles), session_id]
+        [f.originalname, lang, text.trim(), session_id]
       );
     }catch(e){
       console.error('OCR error:', e);
-  // Try to get a meaningful error message
       let errorMsg = 'Unknown error';
       if(e){
         errorMsg = e.message || e.toString();
       }
-
       results.push({ filename: f.originalname,session_id, error: errorMsg});
     }
   }
