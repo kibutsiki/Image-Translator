@@ -19,10 +19,6 @@ process.on('unhandledRejection', err => {
 });
 
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://3.144.33.148'
-]
 //functions
 
 function requireAuthentication(req,res,next){
@@ -37,17 +33,7 @@ function requireAuthentication(req,res,next){
 
 
 
-app.use(cors({
-  origin: function(origin, callback){
-    if(!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else{
-      callback(new Error('Not allowed by CORS'))
-    }
-  },
-  methods: ['GET', 'POST', 'OPTIONS']
-}));
-
+app.use(cors());
 
 
 

@@ -40,6 +40,8 @@ TranslateButton.addEventListener("click", async () => {
 async function translateImage(imageSrcs, language) {
   for (let start = 0; start < imageSrcs.length; start++) { //makes sure to send in batches of 10
     
+    
+    
     const body = JSON.stringify({
       imageSrcs: imageSrcs[start],
       language,
@@ -47,24 +49,19 @@ async function translateImage(imageSrcs, language) {
     });
     
     try {
-      const ocrResponse = await fetch(`http://3.17.59.119/ocr`, { //fetches the backend
+      const ocrResponse = await fetch(`http://3.17.59.119:3000/ocr`, { //fetches the backend
         method: "POST",// sending to backend
         headers: { 'Authorization': 'kibutsiki',
           'Content-Type': 'application/json'
         },
         body: body //data
       });
-
-      //handles errors ocr
       if(!ocrResponse.ok) throw new Error(`HTTP ${ocrResponse.status}`);
       const ocrData = await ocrResponse.json(); //returned data
       ocrData.results.forEach(result => {
         console.log("OCR Result:", result);
       });
-
-
-      //translate 
-      const translateResponse = await fetch(`http://3.17.59.119/translate`, {
+      const translateResponse = await fetch(`http://3.17.59.119:3000/translate`, {
         method: "POST",
         headers: { 'Authorization': 'kibutsiki',
              'Content-Type': 'application/json'
@@ -75,8 +72,6 @@ async function translateImage(imageSrcs, language) {
       translateData.results.forEach(result => {
         console.log("Translate Result:", result);
       });
-
-
     } catch (e) {
       console.error("Error sending to Backend:", e);
     }
