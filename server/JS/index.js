@@ -24,13 +24,6 @@ const allowedOrigins = [
   'http://3.144.33.148'
 ]
 //functions
-function buildTesseractConfig(lang) {
-  const config = { lang: lang, oem: 1, psm: 3 };
-  if (process.platform === 'win32') {
-    config.executablePath = process.env.TESSERACT_PATH;
-  }
-  return config;
-}
 
 function requireAuthentication(req,res,next){
   const token =  req.headers['authorization'];
@@ -78,44 +71,35 @@ app.get('/db/health', async (req,res)=>{
 });
 
 
-app.post('/ocr', requireAuthentication , upload.array('images', 10), async (req,res) => {
-  const lang = (req.body.lang || 'kor').toLowerCase();
-  const allowed = ['eng','jpn', 'kor'];
+
+app.post('/ocr', requireAuthentication, async (req, res) => {
+  const imageUrl = req.body.imageSrcs;
+  const lang = (req.body.language || 'kor').toLowerCase();
   const session_id = req.body.session_id;
-  const results = [];
-  if(!allowed.includes(lang)){
-    return res.status(400).json({ 
-      error: 'Unsupported Language please try Again'
-    });
-  }
-
-  if(!req.files || req.files.length === 0){
+  if (!imageUrl || imageUrl.length === 0) {
     return res.status(400).json({
-      error: 'No images uploaded'
+      error: 'No imageUrl provided'
     });
   }
-
-  for(const f of req.files){
-    try{
-      const config = buildTesseractConfig(lang);
-      const text = await tesseract.recognize(f.buffer, config);
-      results.push({ filename: f.originalname, ocrText: text.trim(), session_id });
-      await pool.query(
-        'INSERT INTO ocr_results (filename, lang, ocr_text, session_id) VALUES ($1, $2, $3, $4)',
-        [f.originalname, lang, text.trim(), session_id]
-      );
-    }catch(e){
-      console.error('OCR error:', e);
-      let errorMsg = 'Unknown error';
-      if(e){
-        errorMsg = e.message || e.toString();
-      }
-      results.push({ filename: f.originalname,session_id, error: errorMsg});
+  try {
+    const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data, 'binary');
+    const config = { lang: 'eng+kor+jpn', oem: 1, psm: 3 };
+    const text = await tesseract.recognize(buffer, config);
+    await pool.query(
+      'INSERT INTO ocr_results (filename, lang, ocr_text, session_id) VALUES ($1, $2, $3, $4)',
+      [imageUrl, lang, text.trim(), session_id]
+    );
+    res.json({ lang, ocrText: text.trim(), session_id, imageUrl });
+  } catch (e) {
+    console.error('OCR error:', e);
+    let errorMsg = 'Unknown error';
+    if (e) {
+      errorMsg = e.message || e.toString();
     }
+    res.status(500).json({ error: errorMsg, imageUrl, session_id });
   }
-
-  res.json({  lang, count: results.length, results, session_id});
-})
+});
 
 
 app.post('/ocr-test', upload.array('images', 10), (req,res)=>{

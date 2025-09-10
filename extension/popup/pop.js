@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+const session_id = uuid.v4();
 
 //Buttons
 const TranslateButton = document.getElementById("Translate-Id");
@@ -38,56 +38,45 @@ TranslateButton.addEventListener("click", async () => {
 });
 
 async function translateImage(imageSrcs, language) {
-  const CHUNK = 10;
-  for (let start = 0; start < imageSrcs.length; start += CHUNK) { //makes sure to send in batches of 10
-    const formData = new FormData();
-    formData.append("language", language);
-
-    const slice = imageSrcs.slice(start, start + CHUNK);
-    const fetched = await Promise.all(slice.map(async (url, i) => { //getting arrays of boolean values
-      try{
-        const res = await fetch(url); //get url
-        if(!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob(); // gets blob
-
-        const clean = url.split(/[?#]/)[0]; //remove query params
-        const lastDot = clean.lastIndexOf(".");
-        let ext = lastDot !== -1 ? clean.slice(lastDot + 1).toLowerCase() : "png";
-        if (!/^[a-z0-9]{2,5}$/.test(ext)) ext = "png";
-
-        formData.append(`images`, blob, `image.${start + i}.${ext}`); //added blob
-        formData.append('session_id', session_id); //added session ID
-        return true;
-      } catch (error) {
-        console.error("Error fetching image:", error);
-        return false;
-      }
-    }));
-
-    if(!fetched.some(Boolean)){
-      console.error("No Images fetched Successfully.");
-      continue;
-    }
+  for (let start = 0; start < imageSrcs.length; start++) { //makes sure to send in batches of 10
+    
+    const body = JSON.stringify({
+      imageSrcs: imageSrcs[start],
+      language,
+      session_id
+    });
+    
     try {
-      const ocrResponse = await fetch(`http://3.144.33.148/ocr`, { //fetches the backend
+      const ocrResponse = await fetch(`http://3.17.59.119/ocr`, { //fetches the backend
         method: "POST",// sending to backend
-        headers: { 'Authorization': 'kibutsiki'},
-        body: formData //data
+        headers: { 'Authorization': 'kibutsiki',
+          'Content-Type': 'application/json'
+        },
+        body: body //data
       });
+
+      //handles errors ocr
       if(!ocrResponse.ok) throw new Error(`HTTP ${ocrResponse.status}`);
       const ocrData = await ocrResponse.json(); //returned data
       ocrData.results.forEach(result => {
         console.log("OCR Result:", result);
-      }); 
-      const translateResponse = await fetch('http://3.144.33.148/translate', {
+      });
+
+
+      //translate 
+      const translateResponse = await fetch(`http://3.17.59.119/translate`, {
         method: "POST",
-        headers: { 'Authorization': 'kibutsiki'},
-        body: formData
+        headers: { 'Authorization': 'kibutsiki',
+             'Content-Type': 'application/json'
+        },
+        body: body
       });
       const translateData = await translateResponse.json();
       translateData.results.forEach(result => {
         console.log("Translate Result:", result);
       });
+
+
     } catch (e) {
       console.error("Error sending to Backend:", e);
     }
