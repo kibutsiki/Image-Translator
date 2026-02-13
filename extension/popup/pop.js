@@ -1,79 +1,98 @@
-const session_id = uuid.v4();
+const WORKER_BASE_URL = "https://your-worker-name.your-account.workers.dev";
+const OCR_LANGUAGE = "eng";
 
-//Buttons
-const TranslateButton = document.getElementById("Translate-Id");
-const language = document.getElementById("language-Id");
+const translateButton = document.getElementById("Translate-Id");
+const languageSelect = document.getElementById("language-Id");
+const statusEl = document.getElementById("status-Id");
+const ocrChip = document.getElementById("ocr-Id");
+const previewEl = document.getElementById("preview-Id");
+const ocrTextEl = document.getElementById("ocrText-Id");
+const translatedTextEl = document.getElementById("translatedText-Id");
 
-TranslateButton.addEventListener("click", async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if(!tab){
-    console.log("No Tabs Opened");
-    return;
+const sessionId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
+
+const setStatus = (text) => {
+  statusEl.textContent = text;
+};
+
+const setOcrChip = (text) => {
+  ocrChip.textContent = text;
+};
+
+const setPreviewImage = (dataUrl) => {
+  previewEl.innerHTML = "";
+  const img = document.createElement("img");
+  img.alt = "Captured screenshot";
+  img.src = dataUrl;
+  previewEl.appendChild(img);
+};
+
+const validateWorkerUrl = () => {
+  if (!WORKER_BASE_URL || WORKER_BASE_URL.includes("your-worker-name")) {
+    throw new Error("Update WORKER_BASE_URL in pop.js with your Cloudflare Worker URL.");
   }
+};
 
-  let imageSrcs =[];
+translateButton.addEventListener("click", async () => {
+  translateButton.disabled = true;
+  setStatus("Capturing the current tab...");
+  setOcrChip("OCR idle");
+  ocrTextEl.value = "";
+  translatedTextEl.value = "";
+
   try {
-    const images = await chrome.scripting.executeScript({ //gets images from the active tab
-      target: {tabId: tab.id},
-      func: () => Array.from(document.images).map(img => img.src)
-    });
-    imageSrcs = (images[0] && images[0].result) || []; //get the images Urls
-  } catch(e){
-    console.error("Failed to retrieve image URLs", e);
-    return;
-  }
-  
-  if(imageSrcs.length === 0){
-    console.log("No images found on the page");
-    return;
-  } 
+    validateWorkerUrl();
 
-  try{
-    await translateImage(imageSrcs, language.value);
-  } catch(e){
-    console.error("Failed to translate images", e);
-  }
-
-
-});
-
-async function translateImage(imageSrcs, language) {
-  for (let start = 0; start < imageSrcs.length; start++) { //makes sure to send in batches of 10
-    
-    
-    
-    const body = JSON.stringify({
-      imageSrcs: imageSrcs[start],
-      language,
-      session_id
-    });
-    
-    try {
-      const ocrResponse = await fetch(`http://3.17.59.119:3000/ocr`, { //fetches the backend
-        method: "POST",// sending to backend
-        headers: { 'Authorization': 'kibutsiki',
-          'Content-Type': 'application/json'
-        },
-        body: body //data
-      });
-      if(!ocrResponse.ok) throw new Error(`HTTP ${ocrResponse.status}`);
-      const ocrData = await ocrResponse.json(); //returned data
-      ocrData.results.forEach(result => {
-        console.log("OCR Result:", result);
-      });
-      const translateResponse = await fetch(`http://3.17.59.119:3000/translate`, {
-        method: "POST",
-        headers: { 'Authorization': 'kibutsiki',
-             'Content-Type': 'application/json'
-        },
-        body: body
-      });
-      const translateData = await translateResponse.json();
-      translateData.results.forEach(result => {
-        console.log("Translate Result:", result);
-      });
-    } catch (e) {
-      console.error("Error sending to Backend:", e);
+    const dataUrl = await chrome.tabs.captureVisibleTab({ format: "png" });
+    if (!dataUrl) {
+      throw new Error("Capture failed. Try again.");
     }
+    setPreviewImage(dataUrl);
+
+    setStatus("Running OCR locally...");
+    const ocrResult = await Tesseract.recognize(dataUrl, OCR_LANGUAGE, {
+      logger: (message) => {
+        if (message.status === "recognizing text") {
+          const pct = Math.round((message.progress || 0) * 100);
+          setOcrChip(`OCR ${pct}%`);
+        }
+      }
+    });
+
+    const extractedText = (ocrResult.data.text || "").trim();
+    setOcrChip(extractedText ? "OCR done" : "OCR empty");
+    ocrTextEl.value = extractedText || "No text detected.";
+
+    if (!extractedText) {
+      setStatus("No text found in the capture.");
+      return;
+    }
+
+    setStatus("Sending text to the translator...");
+    const response = await fetch(`${WORKER_BASE_URL}/translate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        text: extractedText,
+        targetLang: languageSelect.value,
+        sessionId
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Translation failed (${response.status}): ${errText}`);
+    }
+
+    const data = await response.json();
+    translatedTextEl.value = data.translatedText || "No translation returned.";
+    setStatus("Translation complete.");
+  } catch (error) {
+    console.error(error);
+    setStatus(error.message || "Something went wrong.");
+  } finally {
+    translateButton.disabled = false;
   }
-}
+});

@@ -8,11 +8,10 @@
   },
   "permissions":[
     "activeTab",
-    "scripting",
-    "storage"
+    "tabs"
   ],
   "host_permissions":[
-    "http://localhost:3000/*"
+    "https://your-worker-name.your-account.workers.dev/*"
   ],
   "icons":{
       "16": "images/16.png",

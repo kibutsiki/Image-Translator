@@ -3,26 +3,61 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Translate Images</title>
+  <title>Image Translator</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-    <div class="container">
-      <h1 class="title">TRANSLATE IMAGES</h1>
-      <div class="row">
-        <button class="TranslateButton" id = "Translate-Id">Translate</button>
+  <div class="container">
+    <header class="header">
+      <div class="logo">IT</div>
+      <div class="titles">
+        <h1 class="title">Image Translator</h1>
+        <p class="subtitle">Capture. OCR. Translate.</p>
       </div>
-      <label class = "text">Translate To</label>
-      <select id="language-Id">
-        <option value="english">English</option>
-        <option value="spanish">Spanish</option>
-        <option value="french">French</option>
-        <option value="german">German</option>
-        <option value="chinese">Chinese</option>
-        <option value="japanese">Japanese</option>
-      </select>
+    </header>
+
+    <div class="controls">
+      <label class="field">
+        <span class="label">Translate to</span>
+        <select id="language-Id">
+          <option value="EN">English</option>
+          <option value="ES">Spanish</option>
+          <option value="FR">French</option>
+          <option value="DE">German</option>
+          <option value="ZH">Chinese</option>
+          <option value="JA">Japanese</option>
+        </select>
+      </label>
+
+      <button class="primary" id="Translate-Id">Capture & Translate</button>
+      <p class="status" id="status-Id">Ready.</p>
     </div>
+
+    <section class="panel">
+      <div class="panel-header">
+        <span>Screenshot</span>
+        <span class="chip" id="ocr-Id">OCR idle</span>
+      </div>
+      <div class="preview" id="preview-Id">
+        <span>Waiting for capture</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <span>Extracted text</span>
+      </div>
+      <textarea id="ocrText-Id" readonly placeholder="Text will appear here..."></textarea>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <span>Translation</span>
+      </div>
+      <textarea id="translatedText-Id" readonly placeholder="Translation will appear here..."></textarea>
+    </section>
+  </div>
 </body>
-<script src="uuid.min.js"></script>
+<script src="tesseract.min.js"></script>
 <script src="pop.js"></script>
 </html>

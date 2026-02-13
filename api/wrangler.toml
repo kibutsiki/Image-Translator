@@ -1,0 +1,6 @@
+name = "image-translator-worker"
+main = "app/app.js"
+compatibility_date = "2026-02-12"
+
+[vars]
+DEEPL_API_URL = "https://api-free.deepl.com/v2/translate"
