@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import compression from "compression";
 import Tesseract from "tesseract.js";
 import sharp from "sharp";
 
@@ -22,9 +21,9 @@ async function initTesseract() {
 }
 
 // Middleware
-app.use(compression()); // Enable gzip compression
 app.use(cors());
 app.use((req, res, next) => {
+  res.setHeader("Content-Encoding", "gzip"); // Manual gzip instruction
   req.setTimeout(30000); // 30 second timeout
   next();
 });
