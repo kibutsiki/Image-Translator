@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb" }));
+app.use(express.json({ limit: "10mb" })); // Reduced from 50mb
+app.use(express.urlencoded({ limit: "10mb" })); // Reduced from 50mb
 
 // Health check endpoint
 app.get("/", (req, res) => {
@@ -19,7 +19,7 @@ app.get("/", (req, res) => {
 // OCR endpoint
 app.post("/ocr", async (req, res) => {
   try {
-    const { imageBase64, languages = "eng+kor+jpn" } = req.body;
+    const { imageBase64, languages = "eng" } = req.body; // Default to eng only
 
     if (!imageBase64) {
       return res.status(400).json({ error: "imageBase64 is required" });
@@ -33,19 +33,22 @@ app.post("/ocr", async (req, res) => {
       "base64"
     );
 
-    // Preprocess image with sharp for better OCR
-    const processedBuffer = await sharp(imageBuffer)
-      .grayscale() // Convert to grayscale
-      .normalize() // Enhance contrast
-      .sharpen() // Sharpen for better text recognition
+    console.log(`[OCR] Image buffer size: ${imageBuffer.length / 1024}KB`);
+
+    // Aggressive image optimization for memory
+    let processedBuffer = await sharp(imageBuffer)
+      .resize(1500, 1500, { // Max 1500px - drastically reduces memory
+        fit: "inside",
+        withoutEnlargement: true
+      })
+      .grayscale()
+      .normalize()
       .toBuffer();
 
-    console.log("[OCR] Image preprocessed");
+    console.log(`[OCR] Processed image size: ${processedBuffer.length / 1024}KB`);
 
-    // Run Tesseract
-    const {
-      data: { text, confidence, words },
-    } = await Tesseract.recognize(processedBuffer, languages, {
+    // Run Tesseract with memory cleanup
+    const result = await Tesseract.recognize(processedBuffer, languages, {
       logger: (m) => {
         if (m.status === "recognizing text") {
           const progress = Math.round(m.progress * 100);
@@ -53,8 +56,10 @@ app.post("/ocr", async (req, res) => {
             console.log(`[Tesseract] Progress: ${progress}%`);
           }
         }
-      },
+      }
     });
+
+    const { text, confidence, words } = result.data;
 
     console.log(
       `[OCR] Completed - Confidence: ${confidence}, Words: ${words.length}`
@@ -63,18 +68,33 @@ app.post("/ocr", async (req, res) => {
     // Clean text
     const cleanedText = cleanOCRText(text);
 
+    // Force garbage collection if available
+    if (global.gc) {
+      global.gc();
+      console.log("[Memory] Garbage collection triggered");
+    }
+
+    // Clear buffers
+    processedBuffer = null;
+
     res.json({
       success: true,
       text: cleanedText,
       confidence: Math.round(confidence),
       wordCount: words.length,
-      rawText: text,
+      rawText: text
     });
   } catch (error) {
     console.error("[OCR] Error:", error.message);
+    
+    // Force cleanup on error
+    if (global.gc) {
+      global.gc();
+    }
+
     res.status(500).json({
       success: false,
-      error: error.message || "OCR processing failed",
+      error: error.message || "OCR processing failed"
     });
   }
 });
