@@ -6,20 +6,6 @@ import sharp from "sharp";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Global Tesseract worker for reuse (memory optimization)
-let tesseractWorker = null;
-let isShuttingDown = false;
-
-// Initialize or reuse Tesseract worker
-async function initTesseract() {
-  if (!tesseractWorker) {
-    console.log("[Tesseract] Initializing worker...");
-    tesseractWorker = await Tesseract.createWorker("eng");
-    console.log("[Tesseract] Worker initialized");
-  }
-  return tesseractWorker;
-}
-
 // Middleware
 app.use(cors());
 app.use((req, res, next) => {
@@ -37,6 +23,7 @@ app.get("/", (req, res) => {
 
 // OCR endpoint
 app.post("/ocr", async (req, res) => {
+  let worker = null;
   try {
     const { imageBase64, languages = "eng" } = req.body; // Default to eng only
 
@@ -66,8 +53,10 @@ app.post("/ocr", async (req, res) => {
 
     console.log(`[OCR] Processed image size: ${processedBuffer.length / 1024}KB`);
 
-    // Run Tesseract with cached worker
-    const worker = await initTesseract();
+    // Create fresh Tesseract worker for this request
+    console.log("[Tesseract] Creating worker...");
+    worker = await Tesseract.createWorker("eng");
+
     console.log("[Tesseract] Starting recognition...");
     const result = await worker.recognize(processedBuffer, languages);
     console.log("[Tesseract] Recognition complete");
@@ -98,7 +87,7 @@ app.post("/ocr", async (req, res) => {
     });
   } catch (error) {
     console.error("[OCR] Error:", error.message);
-    
+
     // Force cleanup on error
     if (global.gc) {
       global.gc();
@@ -108,6 +97,16 @@ app.post("/ocr", async (req, res) => {
       success: false,
       error: error.message || "OCR processing failed"
     });
+  } finally {
+    // Always terminate worker to free memory
+    if (worker) {
+      try {
+        console.log("[Tesseract] Terminating worker...");
+        await worker.terminate();
+      } catch (err) {
+        console.error("[Tesseract] Error terminating worker:", err.message);
+      }
+    }
   }
 });
 
@@ -145,14 +144,10 @@ const server = app.listen(PORT, () => {
 });
 
 // Graceful shutdown
-process.on("SIGTERM", async () => {
+process.on("SIGTERM", () => {
   console.log("[Server] SIGTERM received, shutting down gracefully...");
-  isShuttingDown = true;
-  server.close(async () => {
-    if (tesseractWorker) {
-      console.log("[Tesseract] Terminating worker...");
-      await tesseractWorker.terminate();
-    }
+  server.close(() => {
+    console.log("[Server] Server closed");
     process.exit(0);
   });
 });
