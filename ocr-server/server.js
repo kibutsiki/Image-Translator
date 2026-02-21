@@ -1,13 +1,33 @@
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import Tesseract from "tesseract.js";
 import sharp from "sharp";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Global Tesseract worker for reuse (memory optimization)
+let tesseractWorker = null;
+let isShuttingDown = false;
+
+// Initialize or reuse Tesseract worker
+async function initTesseract() {
+  if (!tesseractWorker) {
+    console.log("[Tesseract] Initializing worker...");
+    tesseractWorker = await Tesseract.createWorker("eng");
+    console.log("[Tesseract] Worker initialized");
+  }
+  return tesseractWorker;
+}
+
 // Middleware
+app.use(compression()); // Enable gzip compression
 app.use(cors());
+app.use((req, res, next) => {
+  req.setTimeout(30000); // 30 second timeout
+  next();
+});
 app.use(express.json({ limit: "10mb" })); // Reduced from 50mb
 app.use(express.urlencoded({ limit: "10mb" })); // Reduced from 50mb
 
@@ -47,8 +67,9 @@ app.post("/ocr", async (req, res) => {
 
     console.log(`[OCR] Processed image size: ${processedBuffer.length / 1024}KB`);
 
-    // Run Tesseract with memory cleanup
-    const result = await Tesseract.recognize(processedBuffer, languages, {
+    // Run Tesseract with cached worker
+    const worker = await initTesseract();
+    const result = await worker.recognize(processedBuffer, languages, {
       logger: (m) => {
         if (m.status === "recognizing text") {
           const progress = Math.round(m.progress * 100);
@@ -81,8 +102,7 @@ app.post("/ocr", async (req, res) => {
       success: true,
       text: cleanedText,
       confidence: Math.round(confidence),
-      wordCount: words.length,
-      rawText: text
+      wordCount: words.length
     });
   } catch (error) {
     console.error("[OCR] Error:", error.message);
@@ -127,7 +147,20 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || "Internal server error" });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[Server] OCR Server running on http://localhost:${PORT}`);
   console.log(`[Server] POST /ocr to process images`);
+});
+
+// Graceful shutdown
+process.on("SIGTERM", async () => {
+  console.log("[Server] SIGTERM received, shutting down gracefully...");
+  isShuttingDown = true;
+  server.close(async () => {
+    if (tesseractWorker) {
+      console.log("[Tesseract] Terminating worker...");
+      await tesseractWorker.terminate();
+    }
+    process.exit(0);
+  });
 });

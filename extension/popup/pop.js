@@ -216,7 +216,7 @@ translateButton.addEventListener("click", async () => {
     // Save to storage
     await saveOCRData(result.text || "No text detected.", screenshotDataUrl);
   } catch (error) {
-    console.error(error);
+    console.error("[Popup] Capture & Extract error:", error);
     setOcrChip("OCR error");
     setStatus(error.message || "Something went wrong.");
     if (previewEl) {
@@ -257,7 +257,7 @@ uploadExtractButton.addEventListener("click", async () => {
     // Save to storage
     await saveOCRData(result.text || "No text detected.", dataUrl);
   } catch (error) {
-    console.error(error);
+    console.error("[Popup] Extract from upload error:", error);
     setOcrChip("OCR error");
     setStatus(error.message || "Something went wrong.");
   } finally {
