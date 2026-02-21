@@ -11,7 +11,7 @@
     "tabs"
   ],
   "host_permissions":[
-    "https://your-worker-name.your-account.workers.dev/*"
+    "https://image-translator-worker.hiep-qqnguyen.workers.dev/*"
   ],
   "icons":{
       "16": "images/16.png",

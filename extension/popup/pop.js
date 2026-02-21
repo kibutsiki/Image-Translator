@@ -1,5 +1,5 @@
-const WORKER_BASE_URL = "https://your-worker-name.your-account.workers.dev";
-const OCR_LANGUAGE = "eng";
+const WORKER_BASE_URL = "https://image-translator-worker.hiep-qqnguyen.workers.dev";
+const OCR_LANGUAGE = "eng+kor+jpn";
 
 const translateButton = document.getElementById("Translate-Id");
 const languageSelect = document.getElementById("language-Id");
@@ -51,6 +51,9 @@ translateButton.addEventListener("click", async () => {
 
     setStatus("Running OCR locally...");
     const ocrResult = await Tesseract.recognize(dataUrl, OCR_LANGUAGE, {
+      workerPath: chrome.runtime.getURL("popup/vendor/tesseract/worker.min.js"),
+      corePath: chrome.runtime.getURL("popup/vendor/tesseract-core/tesseract-core.wasm.js"),
+      langPath: chrome.runtime.getURL("popup/vendor/tesseract-lang"),
       logger: (message) => {
         if (message.status === "recognizing text") {
           const pct = Math.round((message.progress || 0) * 100);

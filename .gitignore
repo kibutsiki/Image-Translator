@@ -4,3 +4,7 @@ server/.env
 server/*.pem
 server/translator-key.json
 
+# Cloudflare Worker local secrets
+api/.dev.vars
+api/.env
+
