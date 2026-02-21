@@ -12,24 +12,20 @@
       <div class="logo">IT</div>
       <div class="titles">
         <h1 class="title">Image Translator</h1>
-        <p class="subtitle">Capture. OCR. Translate.</p>
+        <p class="subtitle">Capture. OCR.</p>
       </div>
     </header>
 
     <div class="controls">
-      <label class="field">
-        <span class="label">Translate to</span>
-        <select id="language-Id">
-          <option value="EN">English</option>
-          <option value="ES">Spanish</option>
-          <option value="FR">French</option>
-          <option value="DE">German</option>
-          <option value="ZH">Chinese</option>
-          <option value="JA">Japanese</option>
-        </select>
-      </label>
+      <div class="upload-row">
+        <label class="file-field">
+          <span class="label">Upload image</span>
+          <input type="file" id="upload-Id" accept="image/*">
+        </label>
+        <button class="secondary" id="Upload-Extract-Id">Extract from Upload</button>
+      </div>
 
-      <button class="primary" id="Translate-Id">Capture & Translate</button>
+      <button class="primary" id="Translate-Id">Capture & Extract</button>
       <p class="status" id="status-Id">Ready.</p>
     </div>
 
@@ -50,14 +46,30 @@
       <textarea id="ocrText-Id" readonly placeholder="Text will appear here..."></textarea>
     </section>
 
-    <section class="panel">
+    <section class="panel" style="background: #f5f5f5;">
       <div class="panel-header">
-        <span>Translation</span>
+        <span>Settings</span>
       </div>
-      <textarea id="translatedText-Id" readonly placeholder="Translation will appear here..."></textarea>
+      <div style="padding: 10px; font-size: 12px;">
+        <label style="display: block; margin-bottom: 5px;">
+          OCR Server URL:
+        </label>
+        <input 
+          type="text" 
+          id="serverUrl-Id" 
+          placeholder="http://localhost:3000"
+          style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;"
+        >
+        <button id="saveServerUrl-Id" style="margin-top: 5px; padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">
+          Save URL
+        </button>
+        <p style="margin-top: 5px; color: #777; font-size: 11px;">
+          Set your OCR server address. Default: http://localhost:3000
+        </p>
+      </div>
     </section>
+
   </div>
 </body>
-<script src="vendor/tesseract/tesseract.min.js"></script>
 <script src="pop.js"></script>
 </html>

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: ocr-server
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: cd ocr-server && npm install
+    startCommand: cd ocr-server && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
