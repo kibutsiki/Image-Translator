@@ -68,16 +68,9 @@ app.post("/ocr", async (req, res) => {
 
     // Run Tesseract with cached worker
     const worker = await initTesseract();
-    const result = await worker.recognize(processedBuffer, languages, {
-      logger: (m) => {
-        if (m.status === "recognizing text") {
-          const progress = Math.round(m.progress * 100);
-          if (progress % 25 === 0) {
-            console.log(`[Tesseract] Progress: ${progress}%`);
-          }
-        }
-      }
-    });
+    console.log("[Tesseract] Starting recognition...");
+    const result = await worker.recognize(processedBuffer, languages);
+    console.log("[Tesseract] Recognition complete");
 
     const { text, confidence, words } = result.data;
 
