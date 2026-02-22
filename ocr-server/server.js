@@ -115,10 +115,11 @@ app.post("/ocr", async (req, res) => {
     console.log("[Tesseract] Starting recognition...");
     const rawText = await runTesseract(tempImagePath, languages, "6");
     console.log("[Tesseract] Recognition complete");
-    console.log("[Tesseract] Detected text:", rawText.substring(0, 200)); // Show first 200 chars
+    console.log("[Tesseract] Detected text (raw):", rawText.substring(0, 200));
 
-    // Clean text
+    // Clean: remove spaces in Korean, drop Latin-only lines, strip "Ve"/"|" -> match HTML (운이좋았다는건 / 알고있지?)
     const cleanedText = cleanOCRText(rawText);
+    console.log("[OCR] Cleaned text (returned):", cleanedText.substring(0, 200));
 
     // Force garbage collection if available
     if (global.gc) {
@@ -158,6 +159,14 @@ app.post("/ocr", async (req, res) => {
 // Has Korean/CJK (so we can drop Latin-only noise lines)
 const hasCJK = (s) => /[\uAC00-\uD7AF\u3130-\u318F\u4E00-\u9FFF]/.test(s);
 
+// Strip leading/trailing Latin letters and symbols (| etc.) so "운이 좋 았 다 는 건 Ve" -> "운이 좋 았 다 는 건"
+const stripLatinEdges = (s) => {
+  return s
+    .replace(/^[\s|A-Za-z]+/, "")
+    .replace(/[\s|A-Za-z]+$/, "")
+    .trim();
+};
+
 // Text cleaning - keep everything except empty lines
 function cleanOCRText(text) {
   if (!text) return "";
@@ -174,9 +183,12 @@ function cleanOCRText(text) {
     .map(line => line.trim())
     .filter(line => line.length > 0);
 
-  // If text has Korean/CJK, drop lines that are only Latin (removes UI noise like "Ve", "Lol", "NN")
+  // If text has Korean/CJK, drop Latin-only lines and strip Latin/symbols from edges of each line
   if (lines.some(hasCJK)) {
-    lines = lines.filter(hasCJK);
+    lines = lines
+      .filter(hasCJK)
+      .map(stripLatinEdges)
+      .filter(line => line.length > 0);
   }
 
   return lines.join("\n");
