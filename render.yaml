@@ -4,7 +4,7 @@ services:
     env: node
     region: oregon
     plan: free
-    buildCommand: cd ocr-server && npm install
+    buildCommand: cd ocr-server && npm install && apt-get update && apt-get install -y tesseract-ocr
     startCommand: cd ocr-server && npm start
     envVars:
       - key: NODE_ENV

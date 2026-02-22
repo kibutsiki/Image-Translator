@@ -14,6 +14,7 @@
   ],
   "host_permissions":[
     "https://image-translator-worker.hiep-qqnguyen.workers.dev/*",
+    "https://*.onrender.com/*",
     "<all_urls>"
   ],
   "background":{

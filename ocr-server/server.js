@@ -1,15 +1,17 @@
 import express from "express";
 import cors from "cors";
-import Tesseract from "tesseract.js";
-import sharp from "sharp";
+import { execFile } from "child_process";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
 app.use((req, res, next) => {
-  res.setHeader("Content-Encoding", "gzip"); // Manual gzip instruction
   req.setTimeout(30000); // 30 second timeout
   next();
 });
@@ -21,14 +23,80 @@ app.get("/", (req, res) => {
   res.json({ status: "OCR Server is running", version: "1.0.0" });
 });
 
+// Helper function to run Tesseract (psm 6 = uniform block of text, good for screenshots/crops)
+function runTesseract(imagePath, languages = "eng", psm = "6") {
+  return new Promise((resolve, reject) => {
+    const outputPath = imagePath.replace(/\.[^.]+$/, "");
+
+    console.log(`[Tesseract] Input file: ${imagePath}`);
+    console.log(`[Tesseract] Output path: ${outputPath}`);
+    console.log(`[Tesseract] Languages: ${languages}, PSM: ${psm}`);
+
+    const args = [imagePath, outputPath, "-l", languages, "--psm", String(psm)];
+    console.log(`[Tesseract] Full command: tesseract ${args.join(" ")}`);
+
+    execFile("tesseract", args, (error, stdout, stderr) => {
+      console.log(`[Tesseract] Command output:`, stdout || "(no stdout)");
+      if (stderr) console.log(`[Tesseract] Command stderr:`, stderr);
+
+      if (error && error.code !== 0) {
+        console.error("[Tesseract] Error code:", error.code);
+        reject(new Error("Tesseract processing failed: " + (stderr || error.message)));
+        return;
+      }
+
+      // Read the output text file
+      const textFile = outputPath + ".txt";
+      console.log(`[Tesseract] Looking for output file: ${textFile}`);
+
+      if (!fs.existsSync(textFile)) {
+        console.error(`[Tesseract] Output file not found at ${textFile}`);
+        reject(new Error("Tesseract did not generate output file"));
+        return;
+      }
+
+      fs.readFile(textFile, "utf8", (err, data) => {
+        if (err) {
+          reject(new Error("Failed to read OCR output: " + err.message));
+          return;
+        }
+
+        console.log(`[Tesseract] Output file size: ${data.length} bytes`);
+
+        // Clean up only text file, keep image for debugging
+        fs.unlink(textFile, () => {});
+        // Don't delete image: fs.unlink(imagePath, () => {});
+
+        resolve(data);
+      });
+    });
+  });
+}
+
 // OCR endpoint
 app.post("/ocr", async (req, res) => {
-  let worker = null;
+  let tempImagePath = null;
+
   try {
-    const { imageBase64, languages = "eng" } = req.body; // Default to eng only
+    let { imageBase64, languages } = req.body;
 
     if (!imageBase64) {
       return res.status(400).json({ error: "imageBase64 is required" });
+    }
+
+    // Validate and sanitize languages - only use what's installed (must match Tesseract tessdata on server)
+    // Add "jpn", "chi_tra", "chi_sim" when you have those tessdata installed
+    const validLangs = ["eng", "kor"];
+    if (!languages) {
+      languages = "eng"; // Default
+    }
+    
+    // Split and filter to only valid languages
+    const langArray = languages.split("+").filter(lang => validLangs.includes(lang.trim()));
+    if (langArray.length === 0) {
+      languages = "eng"; // Fallback if none valid
+    } else {
+      languages = langArray.join("+");
     }
 
     console.log(`[OCR] Processing image, languages: ${languages}`);
@@ -41,34 +109,16 @@ app.post("/ocr", async (req, res) => {
 
     console.log(`[OCR] Image buffer size: ${imageBuffer.length / 1024}KB`);
 
-    // Aggressive image optimization for memory
-    let processedBuffer = await sharp(imageBuffer)
-      .resize(1500, 1500, { // Max 1500px - drastically reduces memory
-        fit: "inside",
-        withoutEnlargement: true
-      })
-      .grayscale()
-      .normalize()
-      .toBuffer();
-
-    console.log(`[OCR] Processed image size: ${processedBuffer.length / 1024}KB`);
-
-    // Create fresh Tesseract worker for this request
-    console.log("[Tesseract] Creating worker...");
-    worker = await Tesseract.createWorker("eng");
+    tempImagePath = path.join(__dirname, `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.png`);
+    fs.writeFileSync(tempImagePath, imageBuffer);
 
     console.log("[Tesseract] Starting recognition...");
-    const result = await worker.recognize(processedBuffer, languages);
+    const rawText = await runTesseract(tempImagePath, languages, "6");
     console.log("[Tesseract] Recognition complete");
-
-    const { text, confidence, words } = result.data;
-
-    console.log(
-      `[OCR] Completed - Confidence: ${confidence}, Words: ${words.length}`
-    );
+    console.log("[Tesseract] Detected text:", rawText.substring(0, 200)); // Show first 200 chars
 
     // Clean text
-    const cleanedText = cleanOCRText(text);
+    const cleanedText = cleanOCRText(rawText);
 
     // Force garbage collection if available
     if (global.gc) {
@@ -76,14 +126,10 @@ app.post("/ocr", async (req, res) => {
       console.log("[Memory] Garbage collection triggered");
     }
 
-    // Clear buffers
-    processedBuffer = null;
-
     res.json({
       success: true,
       text: cleanedText,
-      confidence: Math.round(confidence),
-      wordCount: words.length
+      wordCount: (cleanedText.match(/\S+/g) || []).length
     });
   } catch (error) {
     console.error("[OCR] Error:", error.message);
@@ -98,38 +144,42 @@ app.post("/ocr", async (req, res) => {
       error: error.message || "OCR processing failed"
     });
   } finally {
-    // Always terminate worker to free memory
-    if (worker) {
+    // Clean up temp file
+    if (tempImagePath && fs.existsSync(tempImagePath)) {
       try {
-        console.log("[Tesseract] Terminating worker...");
-        await worker.terminate();
+        fs.unlinkSync(tempImagePath);
       } catch (err) {
-        console.error("[Tesseract] Error terminating worker:", err.message);
+        console.error("[OCR] Failed to cleanup temp file:", err.message);
       }
     }
   }
 });
 
-// Text cleaning function
+// Has Korean/CJK (so we can drop Latin-only noise lines)
+const hasCJK = (s) => /[\uAC00-\uD7AF\u3130-\u318F\u4E00-\u9FFF]/.test(s);
+
+// Text cleaning - keep everything except empty lines
 function cleanOCRText(text) {
   if (!text) return "";
 
-  const lines = text.split("\n");
-  const cleaned = lines
-    .map((line) => {
-      const asciiChars = (line.match(/[\x20-\x7E]/g) || []).length;
-      const totalChars = line.trim().length;
-
-      if (totalChars > 0 && asciiChars / totalChars < 0.3) {
-        return null;
+  let lines = text
+    .split("\n")
+    .map(line => {
+      const hasNonLatin = /[^\x00-\x7F]/.test(line);
+      if (hasNonLatin) {
+        return line.replace(/\s+/g, ""); // Remove spaces between Korean/Chinese chars
       }
-
-      return line.replace(/[^\x20-\x7E\n]/g, "").trim();
+      return line;
     })
-    .filter((line) => line && line.length > 1)
-    .join("\n");
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
 
-  return cleaned;
+  // If text has Korean/CJK, drop lines that are only Latin (removes UI noise like "Ve", "Lol", "NN")
+  if (lines.some(hasCJK)) {
+    lines = lines.filter(hasCJK);
+  }
+
+  return lines.join("\n");
 }
 
 // Error handling
