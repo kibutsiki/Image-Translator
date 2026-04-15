@@ -1,203 +1,281 @@
+import "dotenv/config";
 import express from "express";
-import cors from "cors";
-import { execFile } from "child_process";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use((req, res, next) => {
-  req.setTimeout(30000); // 30 second timeout
-  next();
-});
-app.use(express.json({ limit: "10mb" })); // Reduced from 50mb
-app.use(express.urlencoded({ limit: "10mb" })); // Reduced from 50mb
+// Parse JSON payloads from the extension
+app.use(express.json({ limit: "15mb" }));
 
-// Health check endpoint
-app.get("/", (req, res) => {
-  res.json({ status: "OCR Server is running", version: "1.0.0" });
+// Health check
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
 });
 
-// Helper function to run Tesseract (psm 6 = uniform block of text, good for screenshots/crops)
-function runTesseract(imagePath, languages = "eng", psm = "6") {
-  return new Promise((resolve, reject) => {
-    const outputPath = imagePath.replace(/\.[^.]+$/, "");
+// --- TAMU AI helpers (reuse your existing AI backend) ---
 
-    console.log(`[Tesseract] Input file: ${imagePath}`);
-    console.log(`[Tesseract] Output path: ${outputPath}`);
-    console.log(`[Tesseract] Languages: ${languages}, PSM: ${psm}`);
-
-    const args = [imagePath, outputPath, "-l", languages, "--psm", String(psm)];
-    console.log(`[Tesseract] Full command: tesseract ${args.join(" ")}`);
-
-    execFile("tesseract", args, (error, stdout, stderr) => {
-      console.log(`[Tesseract] Command output:`, stdout || "(no stdout)");
-      if (stderr) console.log(`[Tesseract] Command stderr:`, stderr);
-
-      if (error && error.code !== 0) {
-        console.error("[Tesseract] Error code:", error.code);
-        reject(new Error("Tesseract processing failed: " + (stderr || error.message)));
-        return;
-      }
-
-      // Read the output text file
-      const textFile = outputPath + ".txt";
-      console.log(`[Tesseract] Looking for output file: ${textFile}`);
-
-      if (!fs.existsSync(textFile)) {
-        console.error(`[Tesseract] Output file not found at ${textFile}`);
-        reject(new Error("Tesseract did not generate output file"));
-        return;
-      }
-
-      fs.readFile(textFile, "utf8", (err, data) => {
-        if (err) {
-          reject(new Error("Failed to read OCR output: " + err.message));
-          return;
-        }
-
-        console.log(`[Tesseract] Output file size: ${data.length} bytes`);
-
-        // Clean up only text file, keep image for debugging
-        fs.unlink(textFile, () => {});
-        // Don't delete image: fs.unlink(imagePath, () => {});
-
-        resolve(data);
-      });
-    });
-  });
+function requireTamu() {
+  const endpoint = process.env.TAMUS_AI_CHAT_API_ENDPOINT;
+  const apiKey = process.env.TAMUS_AI_CHAT_API_KEY;
+  if (!endpoint || !apiKey) {
+    throw new Error("Missing TAMUS_AI_CHAT_API_ENDPOINT or TAMUS_AI_CHAT_API_KEY");
+  }
+  return { endpoint: endpoint.replace(/\/+$/, ""), apiKey };
 }
 
-// OCR endpoint
-app.post("/ocr", async (req, res) => {
-  let tempImagePath = null;
+async function tamuChatCompletions(messages) {
+  const { endpoint, apiKey } = requireTamu();
+
+  const payload = {
+    model: "protected.gemini-2.0-flash-lite",
+    stream: false,
+    messages
+  };
+
+  const startedAt = Date.now();
+  const resp = await fetch(`${endpoint}/api/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(`TAMU upstream error ${resp.status}: ${JSON.stringify(data)}`);
+  }
+
+  const out = data.choices?.[0]?.message?.content;
+  if (!out) {
+    throw new Error("TAMU response missing choices[0].message.content");
+  }
+  return {
+    content: out,
+    upstream: {
+      model: data.model || payload.model,
+      usage: data.usage || null,
+      latency_ms: Date.now() - startedAt
+    }
+  };
+}
+
+function logUpstreamResult(tag, result) {
+  const model = result?.upstream?.model || "unknown";
+  const usage = result?.upstream?.usage || null;
+  const text = String(result?.content || "");
+  const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text;
+
+  console.log(`[${tag}] model=${model}`);
+  if (usage) {
+    console.log(`[${tag}] tokens prompt=${usage.prompt_tokens} completion=${usage.completion_tokens} total=${usage.total_tokens}`);
+  } else {
+    console.log(`[${tag}] tokens usage not provided by upstream`);
+  }
+  console.log(`[${tag}] message:\n${preview}\n---`);
+}
+
+async function tamuTranslate(text, targetLang) {
+  return tamuChatCompletions([
+    {
+      role: "system",
+      content:
+        `Translate the user's text to ${targetLang}. ` +
+        "Preserve line breaks and punctuation. Return only the translation."
+    },
+    { role: "user", content: text }
+  ]);
+}
+
+// --- Routes ---
+
+function parseDataUrl(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.*)$/);
+  if (!match) return null;
+  return { mimeType: match[1], base64: match[2] };
+}
+
+async function tamuVisionExtractFromBase64(base64, mimeType) {
+  return tamuChatCompletions([
+    {
+      role: "system",
+      content: "Extract all readable text from this image. Return only the text, no commentary."
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: `data:${mimeType};base64,${base64}` }
+        }
+      ]
+    }
+  ]);
+}
+
+async function tamuVisionExtractBubbles(base64, mimeType) {
+  return tamuChatCompletions([
+    {
+      role: "system",
+      content:
+        "You read manga/comic images. Find every speech bubble and text box in this panel.\n" +
+        "Return ONLY the text from speech bubbles, in reading order (top to bottom, right to left for manga).\n" +
+        "Separate each bubble's text with the exact delimiter: ---BUBBLE---\n" +
+        "Ignore sound effects, decorative text, and watermarks.\n" +
+        "Return the original text exactly as written. Do NOT translate.\n" +
+        "If no speech bubbles found, return nothing."
+    },
+    {
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: `data:${mimeType};base64,${base64}` }
+        }
+      ]
+    }
+  ]);
+}
+
+// Text-only translation endpoint used by the extension.
+// Body: { text: string, target_lang?: string }
+// Default language is English ("en") if not provided.
+app.post("/translate-text", async (req, res) => {
+  const { text, target_lang } = req.body || {};
+  const lang = (target_lang || "en").trim();
+
+  if (!text) {
+    return res.status(400).json({ error: "text is required" });
+  }
 
   try {
-    let { imageBase64, languages } = req.body;
-
-    if (!imageBase64) {
-      return res.status(400).json({ error: "imageBase64 is required" });
-    }
-
-    // Validate and sanitize languages - only use what's installed (must match Tesseract tessdata on server)
-    // Add "jpn", "chi_tra", "chi_sim" when you have those tessdata installed
-    const validLangs = ["eng", "kor"];
-    if (!languages) {
-      languages = "eng"; // Default
-    }
-    
-    // Split and filter to only valid languages
-    const langArray = languages.split("+").filter(lang => validLangs.includes(lang.trim()));
-    if (langArray.length === 0) {
-      languages = "eng"; // Fallback if none valid
-    } else {
-      languages = langArray.join("+");
-    }
-
-    console.log(`[OCR] Processing image, languages: ${languages}`);
-
-    // Convert base64 to buffer
-    const imageBuffer = Buffer.from(
-      imageBase64.replace(/^data:image\/\w+;base64,/, ""),
-      "base64"
-    );
-
-    console.log(`[OCR] Image buffer size: ${imageBuffer.length / 1024}KB`);
-
-    tempImagePath = path.join(__dirname, `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.png`);
-    fs.writeFileSync(tempImagePath, imageBuffer);
-
-    console.log("[Tesseract] Starting recognition...");
-    const rawText = await runTesseract(tempImagePath, languages, "6");
-    console.log("[Tesseract] Recognition complete");
-    console.log("[Tesseract] Detected text:", rawText.substring(0, 200)); // Show first 200 chars
-
-    // Clean text
-    const cleanedText = cleanOCRText(rawText);
-
-    // Force garbage collection if available
-    if (global.gc) {
-      global.gc();
-      console.log("[Memory] Garbage collection triggered");
-    }
-
-    res.json({
-      success: true,
-      text: cleanedText,
-      wordCount: (cleanedText.match(/\S+/g) || []).length
-    });
-  } catch (error) {
-    console.error("[OCR] Error:", error.message);
-
-    // Force cleanup on error
-    if (global.gc) {
-      global.gc();
-    }
-
-    res.status(500).json({
-      success: false,
-      error: error.message || "OCR processing failed"
-    });
-  } finally {
-    // Clean up temp file
-    if (tempImagePath && fs.existsSync(tempImagePath)) {
-      try {
-        fs.unlinkSync(tempImagePath);
-      } catch (err) {
-        console.error("[OCR] Failed to cleanup temp file:", err.message);
+    const result = await tamuTranslate(text, lang);
+    logUpstreamResult("translate-text", result);
+    return res.json({
+      translated_text: result.content,
+      target_lang: lang,
+      meta: {
+        input_chars: String(text).length,
+        upstream: result.upstream
       }
-    }
+    });
+  } catch (err) {
+    console.error("[/translate-text] error", err);
+    return res.status(500).json({
+      error: err.message || "Translation failed"
+    });
   }
 });
 
-// Has Korean/CJK (so we can drop Latin-only noise lines)
-const hasCJK = (s) => /[\uAC00-\uD7AF\u3130-\u318F\u4E00-\u9FFF]/.test(s);
+// Vision OCR + translate endpoint (recommended for better extraction).
+// Body: { imageBase64: string (data URL), target_lang?: string }
+app.post("/vision-translate", async (req, res) => {
+  const { imageBase64, target_lang } = req.body || {};
+  const lang = (target_lang || "en").trim();
 
-// Text cleaning - keep everything except empty lines
-function cleanOCRText(text) {
-  if (!text) return "";
-
-  let lines = text
-    .split("\n")
-    .map(line => {
-      const hasNonLatin = /[^\x00-\x7F]/.test(line);
-      if (hasNonLatin) {
-        return line.replace(/\s+/g, ""); // Remove spaces between Korean/Chinese chars
-      }
-      return line;
-    })
-    .map(line => line.trim())
-    .filter(line => line.length > 0);
-
-  // If text has Korean/CJK, drop lines that are only Latin (removes UI noise like "Ve", "Lol", "NN")
-  if (lines.some(hasCJK)) {
-    lines = lines.filter(hasCJK);
+  const parsed = parseDataUrl(imageBase64);
+  if (!parsed) {
+    return res.status(400).json({ error: "imageBase64 must be a data URL like data:image/png;base64,..." });
   }
 
-  return lines.join("\n");
-}
+  const startedAt = Date.now();
+  try {
+    const extractResult = await tamuVisionExtractFromBase64(parsed.base64, parsed.mimeType);
+    logUpstreamResult("vision-extract", extractResult);
+    const extracted_text = extractResult.content || "";
 
-// Error handling
-app.use((err, req, res, next) => {
-  console.error("[Error]", err);
-  res.status(500).json({ error: err.message || "Internal server error" });
+    const translateResult = extracted_text ? await tamuTranslate(extracted_text, lang) : null;
+    if (translateResult) logUpstreamResult("vision-translate", translateResult);
+    const translated_text = translateResult?.content || "";
+
+    return res.json({
+      extracted_text,
+      translated_text,
+      target_lang: lang,
+      meta: {
+        mimeType: parsed.mimeType,
+        extracted_chars: extracted_text.length,
+        translated_chars: translated_text.length,
+        total_latency_ms: Date.now() - startedAt,
+        upstream: {
+          extract: extractResult.upstream,
+          translate: translateResult?.upstream || null
+        }
+      }
+    });
+  } catch (err) {
+    console.error("[/vision-translate] error", err);
+    return res.status(500).json({ error: err.message || "Vision translate failed" });
+  }
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`[Server] OCR Server running on http://localhost:${PORT}`);
-  console.log(`[Server] POST /ocr to process images`);
+// Vision extract + translate endpoint.
+// Step 1: vision model reads all speech bubble text (no coordinates).
+// Step 2: text-only model translates all bubble texts in one batch call.
+app.post("/vision-translate-bubbles", async (req, res) => {
+  const { imageBase64, target_lang } = req.body || {};
+  const lang = (target_lang || "en").trim();
+
+  const parsed = parseDataUrl(imageBase64);
+  if (!parsed) {
+    return res.status(400).json({ error: "imageBase64 must be a data URL like data:image/png;base64,..." });
+  }
+
+  const startedAt = Date.now();
+  try {
+    const extractResult = await tamuVisionExtractBubbles(parsed.base64, parsed.mimeType);
+    logUpstreamResult("vision-extract-bubbles", extractResult);
+
+    const rawText = (extractResult.content || "").trim();
+    if (!rawText) {
+      return res.json({
+        bubbles: [],
+        target_lang: lang,
+        meta: { total_latency_ms: Date.now() - startedAt, upstream: { extract: extractResult.upstream } }
+      });
+    }
+
+    const originals = rawText.split(/---BUBBLE---/).map((s) => s.trim()).filter(Boolean);
+
+    if (originals.length === 0) {
+      return res.json({
+        bubbles: [],
+        target_lang: lang,
+        meta: { total_latency_ms: Date.now() - startedAt, upstream: { extract: extractResult.upstream } }
+      });
+    }
+
+    const SEPARATOR = "\n---BUBBLE---\n";
+    const translateResult = await tamuTranslate(originals.join(SEPARATOR), lang);
+    logUpstreamResult("bubble-translate", translateResult);
+
+    const translated = (translateResult.content || "").split(/---BUBBLE---/).map((s) => s.trim());
+
+    const bubbles = originals.map((orig, i) => ({
+      original: orig,
+      text: translated[i] || orig
+    }));
+
+    return res.json({
+      bubbles,
+      target_lang: lang,
+      meta: {
+        mimeType: parsed.mimeType,
+        bubble_count: bubbles.length,
+        total_latency_ms: Date.now() - startedAt,
+        upstream: {
+          extract: extractResult.upstream,
+          translate: translateResult.upstream
+        }
+      }
+    });
+  } catch (err) {
+    console.error("[/vision-translate-bubbles] error", err);
+    return res.status(500).json({ error: err.message || "Vision bubble translate failed" });
+  }
 });
 
-// Graceful shutdown
-process.on("SIGTERM", () => {
-  console.log("[Server] SIGTERM received, shutting down gracefully...");
-  server.close(() => {
-    console.log("[Server] Server closed");
-    process.exit(0);
-  });
+app.listen(PORT, () => {
+  console.log(`Listening on port ${PORT}`);
 });
