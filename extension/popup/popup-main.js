@@ -1,44 +1,20 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-
   const el = {
     scanPage: $("scanPage-Id"),
     clickMode: $("clickMode-Id"),
     status: $("status-Id"),
     lang: $("language-Id"),
     serverUrl: $("serverUrl-Id"),
-    saveServer: $("saveServerUrl-Id")
+    apiToken: $("apiToken-Id"),
+    save: $("saveServer-Id"),
+    test: $("testServer-Id"),
+    serverStatus: $("serverStatus-Id")
   };
 
   const DEFAULT_SERVER_URL = "http://localhost:3000";
-
-  const storage = {
-    get(k, fallback) {
-      const v = localStorage.getItem(k);
-      return v == null ? fallback : v;
-    },
-    set(k, v) {
-      localStorage.setItem(k, v);
-    }
-  };
-
-  function setStatus(t) {
-    if (el.status) el.status.textContent = t;
-  }
-
-  function busy(b) {
-    if (el.scanPage) el.scanPage.disabled = b;
-    if (el.clickMode) el.clickMode.disabled = b;
-  }
-
-  function getServerUrl() {
-    return storage.get("ocrServerUrl", DEFAULT_SERVER_URL);
-  }
-
-  function getLang() {
-    const v = el.lang?.value || "en";
-    return String(v).trim() || "en";
-  }
+  const setStatus = (t) => { el.status.textContent = t; };
+  const setServerStatus = (t) => { el.serverStatus.textContent = t; };
 
   function sendMessage(msg) {
     return new Promise((resolve, reject) => {
@@ -49,67 +25,93 @@
     });
   }
 
+  function normalizeUrl(raw) {
+    const value = String(raw || "").trim().replace(/\/+$/, "");
+    if (!value) return DEFAULT_SERVER_URL;
+    try {
+      const u = new URL(value);
+      if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error();
+      return value;
+    } catch {
+      return null;
+    }
+  }
+
+  async function saveServerSettings() {
+    const serverUrl = normalizeUrl(el.serverUrl.value);
+    if (!serverUrl) {
+      setServerStatus("That doesn't look like a valid URL. Example: http://localhost:3000");
+      return false;
+    }
+    await chrome.storage.local.set({ serverUrl, apiToken: el.apiToken.value.trim() });
+    el.serverUrl.value = serverUrl;
+    if (el.apiToken.value.trim() && el.status.textContent.startsWith("Add your")) setStatus("Ready.");
+    return true;
+  }
+
   async function getActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("No active tab found.");
-    if (tab.url && /^(chrome|edge|about|view-source|chrome-extension):/.test(tab.url)) {
-      throw new Error("Cannot run on this page. Open a normal web page.");
+    if (tab.url && /^(chrome|edge|about|view-source|chrome-extension|https:\/\/chromewebstore\.google\.com):/.test(tab.url)) {
+      throw new Error("Can't run on this page. Open a normal web page first.");
     }
     return tab;
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
-    if (el.serverUrl) el.serverUrl.value = getServerUrl();
-    if (el.lang) el.lang.value = storage.get("targetLang", "en");
-    el.lang?.addEventListener("change", () => storage.set("targetLang", el.lang.value));
+  function setBusy(busy) {
+    el.scanPage.disabled = busy;
+    el.clickMode.disabled = busy;
+  }
 
-    el.saveServer?.addEventListener("click", () => {
-      const v = el.serverUrl?.value?.trim();
-      if (!v) return alert("Please enter a valid server URL");
-      storage.set("ocrServerUrl", v);
-      setStatus("Server URL saved.");
+  async function run(mode, startMsg, doneMsg) {
+    setBusy(true);
+    setStatus(startMsg);
+    try {
+      const { apiToken } = await chrome.storage.local.get("apiToken");
+      if (!apiToken) throw new Error("Add your API token under Server first, then press Save.");
+      const tab = await getActiveTab();
+      const resp = await sendMessage({ type: "inject", mode, tabId: tab.id });
+      if (!resp?.ok) throw new Error(resp?.error || "Could not start on this page.");
+      setStatus(doneMsg);
+    } catch (e) {
+      setStatus(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    const stored = await chrome.storage.local.get(["serverUrl", "apiToken", "targetLang"]);
+    el.serverUrl.value = stored.serverUrl || DEFAULT_SERVER_URL;
+    el.apiToken.value = stored.apiToken || "";
+    el.lang.value = stored.targetLang || "en";
+    if (!stored.apiToken) setStatus("Add your server URL and API token below to get started.");
+
+    el.lang.addEventListener("change", () => chrome.storage.local.set({ targetLang: el.lang.value }));
+
+    el.save.addEventListener("click", async () => {
+      if (await saveServerSettings()) setServerStatus("Saved.");
     });
 
-    el.scanPage?.addEventListener("click", async () => {
-      busy(true);
-      setStatus("Scanning all images on page…");
+    el.test.addEventListener("click", async () => {
+      if (!(await saveServerSettings())) return;
+      el.test.disabled = true;
+      setServerStatus("Testing…");
       try {
-        const tab = await getActiveTab();
-        const resp = await sendMessage({
-          type: "inject-scanner",
-          tabId: tab.id,
-          serverUrl: getServerUrl(),
-          target_lang: getLang()
-        });
-        if (!resp?.ok) throw new Error(resp?.error || "Scanner injection failed");
-        setStatus("Scanner running. Check the page for overlays.");
+        const resp = await sendMessage({ type: "test-connection" });
+        setServerStatus(resp?.ok ? resp.message : resp?.error || "Test failed.");
       } catch (e) {
-        setStatus(e?.message || String(e));
+        setServerStatus(e?.message || String(e));
       } finally {
-        busy(false);
+        el.test.disabled = false;
       }
     });
 
-    el.clickMode?.addEventListener("click", async () => {
-      busy(true);
-      setStatus("Activating click-to-translate…");
-      try {
-        const tab = await getActiveTab();
-        const resp = await sendMessage({
-          type: "inject-clicker",
-          tabId: tab.id,
-          serverUrl: getServerUrl(),
-          target_lang: getLang()
-        });
-        if (!resp?.ok) throw new Error(resp?.error || "Clicker injection failed");
-        setStatus("Click mode active. Click any highlighted image on the page.");
-      } catch (e) {
-        setStatus(e?.message || String(e));
-      } finally {
-        busy(false);
-      }
-    });
-
-    setStatus("Ready.");
+    el.scanPage.addEventListener("click", () =>
+      run("scan", "Scanning images on the page…", "Scan started. Progress shows on the page.")
+    );
+    el.clickMode.addEventListener("click", () =>
+      run("click", "Turning on click mode…", "Click mode on. Click an outlined image on the page.")
+    );
   });
 })();

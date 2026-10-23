@@ -1,3 +1,11 @@
-#Node (server)
-ocr-server/node_modules/
-ocr-server/.env
+# dependencies
+node_modules/
+
+# secrets: never commit these
+.env
+.env.*
+!.env.example
+
+# logs and OS files
+*.log
+.DS_Store

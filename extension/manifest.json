@@ -1,32 +1,25 @@
 {
   "manifest_version": 3,
-  "name": "Image-Translator",
-  "description": "translate images to english or desired language",
-  "version":"1.0",
-  "action":{
-      "default_popup": "popup/popup.html"
-  },
-  "permissions":[
-    "activeTab",
-    "tabs",
-    "scripting",
-    "storage"
-  ],
-  "host_permissions":[
-    "https://image-translator-worker.hiep-qqnguyen.workers.dev/*",
-    "https://*.onrender.com/*",
-    "<all_urls>"
-  ],
-  "background":{
-    "service_worker": "background.js"
-  },
-  "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; img-src 'self' data: blob:"
-  },
-  "web_accessible_resources": [],
-  "icons":{
+  "name": "Image Translator",
+  "description": "Translate speech bubbles in manga, manhwa and comic images on any page.",
+  "version": "2.0.0",
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
       "16": "images/16.png",
       "32": "images/32.png",
-      "128": "images/128.png"
+      "48": "images/48.png"
+    }
+  },
+  "permissions": ["activeTab", "scripting", "storage", "declarativeNetRequest"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "images/16.png",
+    "32": "images/32.png",
+    "48": "images/48.png",
+    "128": "images/128.png"
   }
 }

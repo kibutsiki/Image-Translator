@@ -189,3 +189,9 @@ code {
   align-items: center;
   margin-bottom: 8px;
 }
+
+/* v2: stacked server fields and button row */
+.card-muted .field { margin-bottom: 8px; }
+.card-muted .row { gap: 8px; }
+.card-muted .row .btn { flex: 1; }
+.card-muted .input { width: 100%; box-sizing: border-box; }
